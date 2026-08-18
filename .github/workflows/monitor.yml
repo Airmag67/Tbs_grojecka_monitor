@@ -23,6 +23,6 @@ jobs:
         
       - name: Uruchomienie skryptu monitorującego
         env:
-          TELEGRAM_TOKEN: ${{ secrets.8286365864:AAFw55UEI54licooleHsHu5Ag4hhU64d03k }}
-          TELEGRAM_CHAT_ID: ${{ serets8286365864 }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python monitor.py
