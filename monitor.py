@@ -11,7 +11,7 @@ from pypdf import PdfReader
 
 
 # ============================================================
-# KONFIGURACJA
+# KONFIGURACJA I SŁOWNIKI KRYTERIÓW
 # ============================================================
 
 URLS = [
@@ -21,17 +21,37 @@ URLS = [
 
 STATE_FILE = "state.json"
 
+# Słowa kluczowe o najwyższym priorytecie (wyniki, listy, przydziały)
 KEYWORDS_CRITICAL = [
     "lista podstawowa",
     "lista rezerwowa",
     "wyniki naboru",
     "wyniki naborów",
+    "ostateczna lista",
+    "lista najemców",
+    "przydział mieszkań",
+    "ocena punktowa",
+    "lista punktowa",
+    "weryfikacja wniosków",
+    "osoby zakwalifikowane",
 ]
 
+# Słowa identyfikujące inwestycję
 KEYWORDS_INVESTMENT = [
     "grójecka",
     "grójeckiej",
     "grojecka",
+    "grojeckiej",
+]
+
+# Słowa świadczące o nowym komunikacie/ogłoszeniu w sprawie naboru
+KEYWORDS_UPDATE = [
+    "aktualizacja",
+    "nowy komunikat",
+    "ogłoszenie",
+    "ważna informacja",
+    "informacja dla wnioskodawców",
+    "zakończenie naboru",
 ]
 
 HEADERS = {
@@ -105,7 +125,8 @@ def get_page(url):
 
 def extract_page_text(html):
     soup = BeautifulSoup(html, "html.parser")
-    for element in soup(["script", "style", "noscript", "header", "footer"]):
+    # Usuwamy nagłówek, stopkę i skrypty, aby ignorować zmiany np. w menu czy dacie na dole strony
+    for element in soup(["script", "style", "noscript", "header", "footer", "nav"]):
         element.decompose()
     return normalize(soup.get_text(" "))
 
@@ -142,24 +163,29 @@ def extract_pdf_text(data):
 def analyse_text(text, source_url):
     critical = [k for k in KEYWORDS_CRITICAL if normalize(k) in text]
     investment = [k for k in KEYWORDS_INVESTMENT if normalize(k) in text]
+    update = [k for k in KEYWORDS_UPDATE if normalize(k) in text]
 
     is_result = False
+    reasons = []
 
-    # 1. Strona dedykowana: Każda zmiana jest ważna
+    # 1. Strona dedykowana inwestycji (node/311)
     if "node/311" in source_url:
         is_result = True
+        reasons.append("Zmiana na stronie dedykowanej")
         
-    # 2. Główna strona/PDF: Słowo krytyczne + dotyczy inwestycji
+    # 2. Główna strona/PDF: Znaleziono słowa krytyczne (wyniki, listy) ORAZ dotyczy inwestycji
     elif critical and investment:
         is_result = True
+        reasons.extend(critical)
         
-    # 3. Główna strona/PDF: Słowo inwestycji + słowo o naborze
-    elif investment and ("nabor" in text or "wniosek" in text or "lista" in text):
+    # 3. Główna strona/PDF: Znaleziono ogólną aktualizację ORAZ dotyczy inwestycji
+    elif update and investment:
         is_result = True
+        reasons.extend(update)
 
     return {
         "is_result": is_result,
-        "critical": critical,
+        "keywords": list(set(reasons)) # Usuwamy duplikaty powodów
     }
 
 
@@ -176,14 +202,10 @@ def main():
     print("TBS GRÓJECKA 91 MONITOR")
     print("================================")
 
-    # Wysłanie testowej wiadomości przy pierwszym uruchomieniu
     if is_first_run:
-        print("Pierwsze uruchomienie bota - próba wysłania wiadomości testowej...")
-        try:
-            telegram("✅ Monitor TBS Grójecka 91 został pomyślnie uruchomiony! Bot rozpoczął sprawdzanie stron.")
-            print("Wiadomość testowa wysłana pomyślnie.")
-        except Exception as e:
-            print(f"BŁĄD TELEGRAMA: Nie udało się wysłać wiadomości testowej! Sprawdź Token i Chat ID. Szczegóły: {e}")
+        print("Pierwsze uruchomienie bota - zapisuję stan początkowy bez wywoływania fałszywych alarmów.")
+        # Nie wysyłamy już wiadomości powitalnej przy każdym pierwszym uruchomieniu,
+        # skoro sprawdziliśmy już, że komunikacja Telegram działa poprawnie.
 
     for page_url in URLS:
         print(f"\nSprawdzam: {page_url}")
@@ -191,7 +213,7 @@ def main():
         try:
             html = get_page(page_url)
         except Exception as error:
-            print(f"Błąd strony: {error}")
+            print(f"Błąd pobierania strony: {error}")
             continue
 
         page_text = extract_page_text(html)
@@ -202,6 +224,7 @@ def main():
         if previous_hash is None:
             print("     Zapamiętano stan początkowy strony.")
             state["pages"][page_url] = page_hash
+            
         elif previous_hash != page_hash:
             print("     WYKRYTO ZMIANĘ TEKSTU NA STRONIE!")
             state["pages"][page_url] = page_hash
@@ -211,15 +234,15 @@ def main():
                 found_results.append({
                     "type": "page",
                     "url": page_url,
-                    "title": "Aktualizacja strony",
-                    "keywords": analysis["critical"]
+                    "title": "Aktualizacja treści na stronie",
+                    "keywords": analysis["keywords"]
                 })
         else:
             print("     Strona bez zmian (tekst identyczny).")
 
         # SPRAWDZANIE PDF
         pdfs = find_pdf_links(html, page_url)
-        print(f"Znaleziono plików PDF: {len(pdfs)}")
+        print(f"Znaleziono plików PDF na stronie: {len(pdfs)}")
 
         for pdf in pdfs:
             pdf_url = pdf["url"]
@@ -233,7 +256,6 @@ def main():
             previous = state["pdfs"].get(pdf_url)
 
             if previous is None:
-                # Jeśli to pierwsze uruchomienie skryptu, nie alarmuj o wszystkich istniejących PDFach
                 if is_first_run:
                     state["pdfs"][pdf_url] = file_hash
                     continue
@@ -247,7 +269,7 @@ def main():
                         "type": "pdf",
                         "url": pdf_url,
                         "title": pdf["title"],
-                        "keywords": analysis["critical"]
+                        "keywords": analysis["keywords"]
                     })
                 state["pdfs"][pdf_url] = file_hash
                 
@@ -260,8 +282,8 @@ def main():
                     found_results.append({
                         "type": "pdf",
                         "url": pdf_url,
-                        "title": pdf["title"] + " (Zaktualizowano)",
-                        "keywords": analysis["critical"]
+                        "title": pdf["title"] + " (Zaktualizowano treść)",
+                        "keywords": analysis["keywords"]
                     })
                 state["pdfs"][pdf_url] = file_hash
 
@@ -276,7 +298,7 @@ def main():
             message += f"{ikona} {result['title']}\n{result['url']}\n"
             
             if result["keywords"]:
-                message += "🔎 Kluczowe słowa: " + ", ".join(result["keywords"]) + "\n"
+                message += "🔎 Wykryto: " + ", ".join(result["keywords"]) + "\n"
             message += "\n"
 
         try:
@@ -285,10 +307,10 @@ def main():
         except Exception as e:
             print(f"\n🚨 BŁĄD PODCZAS WYSYŁANIA ALARMU: {e}")
     else:
-        print("\nBrak nowych wyników do zaraportowania.")
+        print("\nBrak interesujących nowości. Nie wysyłam powiadomienia.")
 
     save_state(state)
-    print("Stan zapisany.")
+    print("Stan sprawdzania zaktualizowany i zapisany.")
 
 
 if __name__ == "__main__":
