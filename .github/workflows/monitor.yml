@@ -1,12 +1,28 @@
 name: TBS Grójecka 91 Monitor
 
 on:
+  schedule:
+    - cron: '0 * * * *'
   workflow_dispatch:
 
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
-
+    
     steps:
-      - name: Test
-        run: echo "TBS MONITOR DZIAŁA"
+      - name: Pobranie kodu repozytorium
+        uses: actions/checkout@v3
+        
+      - name: Konfiguracja środowiska Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          
+      - name: Instalacja bibliotek
+        run: pip install -r requirements.txt
+        
+      - name: Uruchomienie skryptu monitorującego
+        env:
+          TELEGRAM_TOKEN: ${{ 8286365864:AAFw55UEI54licooleHsHu5Ag4hhU64d03k }}
+          TELEGRAM_CHAT_ID: ${{ 8286365864 }}
+        run: python monitor.py
