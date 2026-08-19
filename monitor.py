@@ -3,7 +3,7 @@ import re
 import json
 import hashlib
 from io import BytesIO
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, unquote
 
 import requests
 from bs4 import BeautifulSoup
@@ -11,23 +11,27 @@ from pypdf import PdfReader
 
 
 # ============================================================
-# TBS GRÓJECKA 91 MONITOR v3
+# TBS GRÓJECKA 91 MONITOR v4
 # ============================================================
 
 STATE_FILE = "state.json"
 
-TBS_DOMAIN = "www.tbswp.pl"
+BASE_DOMAIN = "tbswp.pl"
 
-# ============================================================
-# STRONY STARTOWE
-# ============================================================
+# ------------------------------------------------------------
+# STRONY, KTÓRE MAJĄ BYĆ MONITOROWANE
+# ------------------------------------------------------------
 
-START_URLS = [
+MONITOR_URLS = [
     # TBS
     "https://www.tbswp.pl/",
     "https://www.tbswp.pl/node/311",
     "https://www.tbswp.pl/aktualnosci",
     "https://www.tbswp.pl/projekty/projekty_inwestycyjne",
+
+    # Strony TBS związane z wynajmem
+    "https://www.tbswp.pl/wynajem",
+    "https://www.tbswp.pl/wynajem/lokale_mieszkalne",
 
     # Oficjalne strony Warszawy
     "https://mieszkania.um.warszawa.pl/-/inwestycja-przy-ul-grojeckiej-91-nabor-wnioskow-1",
@@ -35,125 +39,91 @@ START_URLS = [
 ]
 
 
-# ============================================================
+# ------------------------------------------------------------
 # SŁOWA KLUCZOWE
-# ============================================================
+# ------------------------------------------------------------
 
-# Bardzo mocne oznaki, że znaleźliśmy wyniki
 KEYWORDS_RESULT = [
     "lista podstawowa",
     "lista rezerwowa",
     "wyniki naboru",
     "wyniki naborów",
-    "wyniki naboru wniosków",
-    "wyniki naboru na najem",
-    "ostateczna lista",
-    "lista najemców",
-    "lista zakwalifikowanych",
-    "osoby zakwalifikowane",
-    "osoby zakwalifikowane do najmu",
-    "wnioski zakwalifikowane",
-    "lista wnioskodawców",
+    "wynik naboru",
+    "lista rankingowa",
+    "lista rankingowa wniosków",
     "lista osób zakwalifikowanych",
-    "lista osób zakwalifikowanych do zawarcia umowy",
-]
-
-# Słowa związane z procesem naboru
-KEYWORDS_APPLICATION = [
-    "nabór",
-    "nabor",
-    "wniosek",
-    "wnioski",
-    "wnioskodawca",
-    "wnioskodawców",
-    "kwalifikacja",
+    "osoby zakwalifikowane",
     "zakwalifikowani",
-    "zakwalifikowanych",
-    "punktacja",
-    "punkty",
+    "zakwalifikowane",
+    "lista najemców",
+    "przydział mieszkań",
+    "przydział lokali",
     "ocena punktowa",
+    "lista punktowa",
+    "punktacja",
     "weryfikacja wniosków",
-    "kryteria",
-    "kandydat",
-    "kandydaci",
+    "rozstrzygnięcie naboru",
+    "rozstrzygnięcie",
+    "kwalifikacja wniosków",
+    "ostateczna lista",
 ]
 
-# Inwestycja
 KEYWORDS_INVESTMENT = [
     "grójecka 91",
-    "grojecka 91",
     "grójeckiej 91",
+    "grojecka 91",
     "grojeckiej 91",
-    "ul. grójecka",
-    "ul grójecka",
+]
+
+KEYWORDS_UPDATE = [
+    "nabór",
+    "naboru",
+    "wniosków",
+    "wnioskodawców",
+    "wyniki",
+    "lista",
+    "kwalifikacja",
+    "punktacja",
+]
+
+# Nazwy plików, które mogą być wynikami
+RESULT_FILE_KEYWORDS = [
     "grójecka",
     "grojecka",
-    "banacha",
-]
-
-# Dokumenty / komunikaty
-KEYWORDS_UPDATE = [
-    "aktualizacja",
-    "komunikat",
-    "nowy komunikat",
-    "ogłoszenie",
-    "nowe ogłoszenie",
-    "ważna informacja",
-    "informacja dla wnioskodawców",
-    "informacja",
-]
-
-# Nazwy plików, które same w sobie są mocnym sygnałem
-KEYWORDS_FILENAME = [
-    "lista podstawowa",
-    "lista rezerwowa",
-    "lista_podstawowa",
-    "lista_rezerwowa",
+    "wynik",
     "wyniki",
-    "wyniki naboru",
-    "wyniki_naboru",
-    "zakwalifikowani",
-    "lista wnioskodawców",
-    "lista_wnioskodawcow",
+    "nabór",
+    "nabor",
+    "lista",
+    "ranking",
+    "punkt",
+    "kwalifik",
+    "rezerw",
+    "najem",
 ]
 
 
-# ============================================================
-# USTAWIENIA CRAWLERA
-# ============================================================
-
-MAX_PAGES = 60
-MAX_PDFS = 100
-
-# Nie chcemy odwiedzać całego internetu.
-# Tylko domeny, które mają znaczenie dla tego naboru.
-ALLOWED_DOMAINS = {
-    "www.tbswp.pl",
-    "tbswp.pl",
-    "mieszkania.um.warszawa.pl",
-    "um.warszawa.pl",
-}
-
-
-# ============================================================
+# ------------------------------------------------------------
 # HTTP
-# ============================================================
+# ------------------------------------------------------------
 
 HEADERS = {
     "User-Agent": (
-        "Mozilla/5.0 "
-        "(Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 "
-        "(KHTML, like Gecko) "
-        "Chrome/139.0 Safari/537.36 "
-        "TBS-Grojecka91-Monitor/3.0"
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/139.0.0.0 Safari/537.36"
     ),
-    "Accept-Language": "pl-PL,pl;q=0.9,en;q=0.8",
     "Accept": (
-        "text/html,application/xhtml+xml,"
-        "application/xml;q=0.9,*/*;q=0.8"
+        "text/html,application/xhtml+xml,application/xml;"
+        "q=0.9,image/avif,image/webp,*/*;q=0.8"
     ),
+    "Accept-Language": "pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Connection": "keep-alive",
 }
+
+
+SESSION = requests.Session()
+SESSION.headers.update(HEADERS)
 
 
 # ============================================================
@@ -161,13 +131,6 @@ HEADERS = {
 # ============================================================
 
 def normalize(text):
-    """
-    Ujednolica tekst:
-    - małe litery
-    - polskie znaki -> bez znaków diakrytycznych
-    - wielokrotne spacje -> jedna
-    """
-
     if not text:
         return ""
 
@@ -179,84 +142,46 @@ def normalize(text):
     )
 
     text = text.translate(translation)
-
-    text = re.sub(
-        r"\s+",
-        " ",
-        text
-    )
+    text = re.sub(r"\s+", " ", text)
 
     return text.strip()
+
+
+def sha256_bytes(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def sha256_str(text):
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 # ============================================================
 # STATE
 # ============================================================
 
-def empty_state():
-    return {
-        "initialized": False,
-        "pages": {},
-        "pdfs": {},
-        "alerts": {},
-    }
-
-
 def load_state():
 
     if not os.path.exists(STATE_FILE):
-        return empty_state()
+        return {
+            "pages": {},
+            "pdfs": {},
+        }
 
     try:
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
 
-        with open(
-            STATE_FILE,
-            "r",
-            encoding="utf-8"
-        ) as f:
-
-            state = json.load(f)
-
-        state.setdefault(
-            "initialized",
-            False
-        )
-
-        state.setdefault(
-            "pages",
-            {}
-        )
-
-        state.setdefault(
-            "pdfs",
-            {}
-        )
-
-        state.setdefault(
-            "alerts",
-            {}
-        )
-
-        return state
-
-    except Exception as error:
-
-        print(
-            f"⚠️ Nie można odczytać state.json: {error}"
-        )
-
-        return empty_state()
+    except Exception:
+        return {
+            "pages": {},
+            "pdfs": {},
+        }
 
 
 def save_state(state):
 
-    temp_file = (
-        STATE_FILE
-        + ".tmp"
-    )
-
     with open(
-        temp_file,
+        STATE_FILE,
         "w",
         encoding="utf-8"
     ) as f:
@@ -268,29 +193,6 @@ def save_state(state):
             indent=2
         )
 
-    os.replace(
-        temp_file,
-        STATE_FILE
-    )
-
-
-# ============================================================
-# HASH
-# ============================================================
-
-def sha256_bytes(data):
-
-    return hashlib.sha256(
-        data
-    ).hexdigest()
-
-
-def sha256_text(text):
-
-    return hashlib.sha256(
-        text.encode("utf-8")
-    ).hexdigest()
-
 
 # ============================================================
 # TELEGRAM
@@ -298,18 +200,14 @@ def sha256_text(text):
 
 def telegram(message):
 
-    token = os.environ[
-        "TELEGRAM_TOKEN"
-    ]
+    token = os.environ.get("TELEGRAM_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
 
-    chat_id = os.environ[
-        "TELEGRAM_CHAT_ID"
-    ]
+    if not token or not chat_id:
+        print("❌ Brak TELEGRAM_TOKEN lub TELEGRAM_CHAT_ID")
+        return False
 
-    url = (
-        "https://api.telegram.org/"
-        f"bot{token}/sendMessage"
-    )
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
 
     response = requests.post(
         url,
@@ -323,44 +221,32 @@ def telegram(message):
 
     response.raise_for_status()
 
+    return True
+
 
 # ============================================================
 # HTTP
 # ============================================================
 
-def download(url, timeout=40):
+def get_url(url):
 
-    response = requests.get(
-        url,
-        headers=HEADERS,
-        timeout=timeout,
-        allow_redirects=True,
-    )
+    try:
 
-    response.raise_for_status()
+        response = SESSION.get(
+            url,
+            timeout=30,
+            allow_redirects=True
+        )
 
-    return response
+        return response
 
+    except Exception as error:
 
-def get_page(url):
+        print(
+            f"     ❌ Błąd HTTP: {error}"
+        )
 
-    response = download(
-        url,
-        timeout=40
-    )
-
-    content_type = (
-        response.headers
-        .get("Content-Type", "")
-        .lower()
-    )
-
-    print(
-        f"     HTTP {response.status_code}"
-        f" | {content_type}"
-    )
-
-    return response.text
+        return None
 
 
 # ============================================================
@@ -379,7 +265,9 @@ def extract_page_text(html):
             "script",
             "style",
             "noscript",
-            "svg",
+            "header",
+            "footer",
+            "nav",
         ]
     ):
 
@@ -390,144 +278,9 @@ def extract_page_text(html):
     )
 
 
-def absolute_url(
-    href,
-    base_url
-):
-
-    if not href:
-        return None
-
-    href = href.strip()
-
-    if href.startswith(
-        (
-            "mailto:",
-            "tel:",
-            "javascript:",
-            "#",
-        )
-    ):
-        return None
-
-    return urljoin(
-        base_url,
-        href
-    ).split("#")[0]
-
-
-def is_allowed_domain(url):
-
-    try:
-
-        hostname = urlparse(
-            url
-        ).netloc.lower()
-
-        return hostname in ALLOWED_DOMAINS
-
-    except Exception:
-
-        return False
-
-
-def find_links(
-    html,
-    base_url
-):
-
-    soup = BeautifulSoup(
-        html,
-        "html.parser"
-    )
-
-    links = []
-
-    for tag in soup.find_all(
-        "a",
-        href=True
-    ):
-
-        url = absolute_url(
-            tag["href"],
-            base_url
-        )
-
-        if not url:
-            continue
-
-        if not is_allowed_domain(
-            url
-        ):
-            continue
-
-        title = tag.get_text(
-            " ",
-            strip=True
-        )
-
-        links.append({
-            "url": url,
-            "title": title or "",
-        })
-
-    unique = {}
-
-    for item in links:
-
-        unique[
-            item["url"]
-        ] = item
-
-    return list(
-        unique.values()
-    )
-
-
-def find_pdfs(
-    html,
-    base_url
-):
-
-    links = find_links(
-        html,
-        base_url
-    )
-
-    pdfs = {}
-
-    for link in links:
-
-        url = link["url"]
-
-        if ".pdf" in url.lower():
-
-            pdfs[url] = {
-                "url": url,
-                "title": (
-                    link["title"]
-                    or "Dokument PDF"
-                ),
-            }
-
-    return list(
-        pdfs.values()
-    )
-
-
 # ============================================================
 # PDF
 # ============================================================
-
-def download_pdf(url):
-
-    response = download(
-        url,
-        timeout=60
-    )
-
-    return response.content
-
 
 def extract_pdf_text(data):
 
@@ -537,296 +290,462 @@ def extract_pdf_text(data):
             BytesIO(data)
         )
 
-        pages = []
+        text = ""
 
         for page in reader.pages:
 
-            try:
+            text += "\n"
+            text += page.extract_text() or ""
 
-                text = (
-                    page.extract_text()
-                    or ""
-                )
-
-                pages.append(
-                    text
-                )
-
-            except Exception:
-                pass
-
-        return normalize(
-            "\n".join(pages)
-        )
+        return normalize(text)
 
     except Exception as error:
 
         print(
-            f"     ❌ Błąd odczytu PDF: {error}"
+            f"        ⚠️ Nie udało się odczytać PDF: {error}"
         )
 
         return ""
 
 
-# ============================================================
-# KEYWORD SEARCH
-# ============================================================
+def download_pdf(url):
 
-def matches(
-    text,
-    keywords
-):
-
-    return [
-        keyword
-        for keyword in keywords
-        if normalize(keyword)
-        in text
-    ]
-
-
-# ============================================================
-# ANALIZA DOKUMENTU
-# ============================================================
-
-def analyse(
-    text,
-    url,
-    title=""
-):
-
-    normalized_url = normalize(
-        url
+    response = SESSION.get(
+        url,
+        timeout=60
     )
 
-    normalized_title = normalize(
-        title
+    response.raise_for_status()
+
+    return response.content
+
+
+# ============================================================
+# LINKI PDF
+# ============================================================
+
+def find_pdf_links(html, base_url):
+
+    soup = BeautifulSoup(
+        html,
+        "html.parser"
     )
+
+    pdfs = {}
+
+    for link in soup.find_all(
+        "a",
+        href=True
+    ):
+
+        href = link["href"]
+
+        if ".pdf" not in href.lower():
+            continue
+
+        pdf_url = urljoin(
+            base_url,
+            href
+        )
+
+        title = (
+            link.get_text(
+                " ",
+                strip=True
+            )
+            or unquote(
+                pdf_url.split("/")[-1]
+            )
+        )
+
+        pdfs[pdf_url] = {
+            "url": pdf_url,
+            "title": title,
+        }
+
+    return list(
+        pdfs.values()
+    )
+
+
+# ============================================================
+# CZY PDF JEST INTERESUJĄCY?
+# ============================================================
+
+def pdf_looks_relevant(title, url, text):
 
     combined = normalize(
-        f"{normalized_url} "
-        f"{normalized_title} "
-        f"{text}"
+        f"{title} {url} {text}"
     )
 
-    result_words = matches(
-        combined,
-        KEYWORDS_RESULT
+    # Najpierw szukamy inwestycji
+    has_investment = any(
+        normalize(keyword)
+        in combined
+        for keyword in KEYWORDS_INVESTMENT
     )
 
-    application_words = matches(
-        combined,
-        KEYWORDS_APPLICATION
+    # Następnie wyników
+    has_result = any(
+        normalize(keyword)
+        in combined
+        for keyword in KEYWORDS_RESULT
     )
 
-    investment_words = matches(
-        combined,
-        KEYWORDS_INVESTMENT
-    )
-
-    update_words = matches(
-        combined,
-        KEYWORDS_UPDATE
-    )
-
-    filename_words = matches(
-        normalized_url,
-        KEYWORDS_FILENAME
-    )
-
-    # --------------------------------------------------------
-    # BARDZO MOCNY SYGNAŁ
-    # --------------------------------------------------------
-
-    if result_words:
-
-        return {
-            "is_result": True,
-            "confidence": "VERY HIGH",
-            "reason": "fraza wynikowa",
-            "result": result_words,
-            "investment": investment_words,
-            "application": application_words,
-            "filename": filename_words,
-            "update": update_words,
-        }
-
-    # --------------------------------------------------------
-    # NAZWA PDF SAMA SUGERUJE WYNIKI
-    # --------------------------------------------------------
-
-    if filename_words:
-
-        return {
-            "is_result": True,
-            "confidence": "VERY HIGH",
-            "reason": "nazwa pliku sugeruje wyniki",
-            "result": result_words,
-            "investment": investment_words,
-            "application": application_words,
-            "filename": filename_words,
-            "update": update_words,
-        }
-
-    # --------------------------------------------------------
-    # LISTA + INWESTYCJA + NABÓR
-    # --------------------------------------------------------
-
-    has_list = (
-        "lista" in combined
-        or "zakwalifikowani" in combined
-        or "zakwalifikowanych" in combined
-    )
-
-    if (
-        has_list
-        and investment_words
-        and application_words
-    ):
-
-        return {
-            "is_result": True,
-            "confidence": "HIGH",
-            "reason": (
-                "lista + inwestycja + nabór"
-            ),
-            "result": result_words,
-            "investment": investment_words,
-            "application": application_words,
-            "filename": filename_words,
-            "update": update_words,
-        }
-
-    # --------------------------------------------------------
-    # NODE/311 + WYNIKI
-    # --------------------------------------------------------
-
-    if (
-        "/node/311" in normalized_url
-        and (
-            "wyniki" in combined
-            or "lista podstawowa" in combined
-            or "lista rezerwowa" in combined
-            or "zakwalifikowani" in combined
+    # Albo charakterystycznej nazwy pliku
+    filename = normalize(
+        unquote(
+            urlparse(url).path
         )
-    ):
+    )
 
-        return {
-            "is_result": True,
-            "confidence": "HIGH",
-            "reason": (
-                "node/311 + frazy wynikowe"
-            ),
-            "result": result_words,
-            "investment": investment_words,
-            "application": application_words,
-            "filename": filename_words,
-            "update": update_words,
-        }
+    has_result_filename = any(
+        normalize(keyword)
+        in filename
+        for keyword in RESULT_FILE_KEYWORDS
+    )
 
-    # --------------------------------------------------------
-    # NOWA INFORMACJA O NABORZE
-    # --------------------------------------------------------
-
-    if (
-        investment_words
-        and application_words
-        and update_words
-    ):
-
-        return {
-            "is_result": False,
-            "confidence": "MEDIUM",
-            "reason": (
-                "nowa informacja dotycząca naboru"
-            ),
-            "result": result_words,
-            "investment": investment_words,
-            "application": application_words,
-            "filename": filename_words,
-            "update": update_words,
-        }
-
-    # --------------------------------------------------------
-    # BRAK
-    # --------------------------------------------------------
-
-    return {
-        "is_result": False,
-        "confidence": "LOW",
-        "reason": "brak oznak wyników",
-        "result": result_words,
-        "investment": investment_words,
-        "application": application_words,
-        "filename": filename_words,
-        "update": update_words,
-    }
+    return (
+        (has_investment and has_result)
+        or
+        (has_investment and has_result_filename)
+    )
 
 
 # ============================================================
-# FORMATOWANIE ALARMU
+# ANALIZA STRONY
 # ============================================================
 
-def format_detection(
-    detection
-):
+def analyse_page(text, url):
 
-    analysis = detection[
-        "analysis"
+    normalized_url = normalize(url)
+
+    critical = [
+        keyword
+        for keyword in KEYWORDS_RESULT
+        if normalize(keyword) in text
     ]
 
-    icon = (
-        "📄"
-        if detection["type"] == "PDF"
-        else "🌐"
-    )
+    investment = [
+        keyword
+        for keyword in KEYWORDS_INVESTMENT
+        if normalize(keyword) in text
+    ]
 
-    message = (
-        f"{icon} {detection['title']}\n"
-        f"{detection['url']}\n\n"
-    )
+    update = [
+        keyword
+        for keyword in KEYWORDS_UPDATE
+        if normalize(keyword) in text
+    ]
 
-    if analysis["result"]:
+    # Dedykowana strona inwestycji
+    if "node/311" in normalized_url:
 
-        message += (
-            "🔎 Wyniki: "
-            + ", ".join(
-                analysis["result"]
+        if critical:
+
+            return True, critical
+
+        # Jeśli node/311 przestanie być pusty,
+        # również chcemy o tym wiedzieć.
+        if investment and update:
+
+            return True, list(
+                set(investment + update)
             )
-            + "\n"
+
+    # Pozostałe strony
+    if critical and investment:
+
+        return True, list(
+            set(critical + investment)
         )
 
-    if analysis["filename"]:
+    return False, []
 
-        message += (
-            "📁 Nazwa pliku: "
-            + ", ".join(
-                analysis["filename"]
-            )
-            + "\n"
-        )
 
-    if analysis["investment"]:
+# ============================================================
+# ZMIANA STATUSU STRONY
+# ============================================================
 
-        message += (
-            "🏢 Inwestycja: "
-            + ", ".join(
-                analysis["investment"]
-            )
-            + "\n"
-        )
+def check_page(
+    url,
+    state,
+    first_run,
+    alerts
+):
 
-    message += (
-        f"🎯 Pewność: "
-        f"{analysis['confidence']}\n"
+    print(
+        f"\n🌐 {url}"
     )
 
-    message += (
-        f"💡 Powód: "
-        f"{analysis['reason']}\n"
+    response = get_url(url)
+
+    if response is None:
+        return
+
+    status = response.status_code
+
+    print(
+        f"     HTTP {status} | "
+        f"{response.headers.get('content-type', '')}"
     )
 
-    return message
+    previous = state["pages"].get(
+        url,
+        {}
+    )
+
+    # --------------------------------------------------------
+    # PIERWSZE URUCHOMIENIE
+    # --------------------------------------------------------
+
+    if not previous:
+
+        print(
+            "     🆕 Pierwsze sprawdzenie — zapisuję stan."
+        )
+
+        state["pages"][url] = {
+            "status": status,
+            "hash": None,
+        }
+
+        if status == 200:
+
+            content_type = response.headers.get(
+                "content-type",
+                ""
+            ).lower()
+
+            if "text/html" in content_type:
+
+                text = extract_page_text(
+                    response.text
+                )
+
+                state["pages"][url]["hash"] = (
+                    sha256_str(text)
+                )
+
+        return
+
+    # --------------------------------------------------------
+    # ZMIANA STATUSU
+    # --------------------------------------------------------
+
+    previous_status = previous.get(
+        "status"
+    )
+
+    if previous_status != status:
+
+        print(
+            f"     🔄 ZMIANA STATUSU: "
+            f"{previous_status} → {status}"
+        )
+
+        # 404 -> 200 jest dla nas SUPER WAŻNE
+        if (
+            previous_status == 404
+            and status == 200
+        ):
+
+            alerts.append({
+                "type": "status",
+                "title": "Strona wyników została uruchomiona!",
+                "url": url,
+                "keywords": [
+                    "404 → 200",
+                    "strona ponownie dostępna"
+                ],
+            })
+
+    # --------------------------------------------------------
+    # STRONA 200
+    # --------------------------------------------------------
+
+    if status == 200:
+
+        content_type = response.headers.get(
+            "content-type",
+            ""
+        ).lower()
+
+        if "text/html" in content_type:
+
+            text = extract_page_text(
+                response.text
+            )
+
+            current_hash = sha256_str(
+                text
+            )
+
+            previous_hash = previous.get(
+                "hash"
+            )
+
+            if (
+                previous_hash
+                and previous_hash != current_hash
+            ):
+
+                print(
+                    "     🔄 ZMIANA TREŚCI"
+                )
+
+                is_result, keywords = analyse_page(
+                    text,
+                    url
+                )
+
+                if is_result:
+
+                    alerts.append({
+                        "type": "page",
+                        "title": "Nowa informacja dotycząca naboru",
+                        "url": url,
+                        "keywords": keywords,
+                    })
+
+            state["pages"][url] = {
+                "status": status,
+                "hash": current_hash,
+            }
+
+    else:
+
+        state["pages"][url] = {
+            "status": status,
+            "hash": previous.get(
+                "hash"
+            ),
+        }
+
+
+# ============================================================
+# PDF
+# ============================================================
+
+def check_pdfs(
+    page_url,
+    html,
+    state,
+    first_run,
+    alerts
+):
+
+    pdfs = find_pdf_links(
+        html,
+        page_url
+    )
+
+    print(
+        f"     📄 PDF-y: {len(pdfs)}"
+    )
+
+    for pdf in pdfs:
+
+        pdf_url = pdf["url"]
+        title = pdf["title"]
+
+        try:
+
+            data = download_pdf(
+                pdf_url
+            )
+
+        except Exception as error:
+
+            print(
+                f"        ❌ PDF: {error}"
+            )
+
+            continue
+
+        current_hash = sha256_bytes(
+            data
+        )
+
+        previous_hash = state["pdfs"].get(
+            pdf_url
+        )
+
+        text = ""
+
+        # ----------------------------------------------------
+        # NOWY PDF
+        # ----------------------------------------------------
+
+        if previous_hash is None:
+
+            print(
+                f"        🆕 NOWY PDF: {title}"
+            )
+
+            text = extract_pdf_text(
+                data
+            )
+
+            relevant = pdf_looks_relevant(
+                title,
+                pdf_url,
+                text
+            )
+
+            if (
+                not first_run
+                and relevant
+            ):
+
+                alerts.append({
+                    "type": "pdf",
+                    "title": title,
+                    "url": pdf_url,
+                    "keywords": [
+                        "nowy PDF",
+                        "wyniki / nabór"
+                    ],
+                })
+
+            state["pdfs"][pdf_url] = (
+                current_hash
+            )
+
+        # ----------------------------------------------------
+        # ZMIANA PDF
+        # ----------------------------------------------------
+
+        elif previous_hash != current_hash:
+
+            print(
+                f"        🔄 ZMIANA PDF: {title}"
+            )
+
+            text = extract_pdf_text(
+                data
+            )
+
+            relevant = pdf_looks_relevant(
+                title,
+                pdf_url,
+                text
+            )
+
+            if relevant:
+
+                alerts.append({
+                    "type": "pdf",
+                    "title": title + " — ZMIANA",
+                    "url": pdf_url,
+                    "keywords": [
+                        "zmieniona zawartość PDF"
+                    ],
+                })
+
+            state["pdfs"][pdf_url] = (
+                current_hash
+            )
 
 
 # ============================================================
@@ -835,490 +754,147 @@ def format_detection(
 
 def main():
 
+    print()
+    print("=" * 55)
+    print("🚨 TBS GRÓJECKA 91 MONITOR v4")
+    print("=" * 55)
+
     state = load_state()
 
-    first_run = not state[
-        "initialized"
-    ]
-
-    detections = []
-
-    pages_to_check = list(
-        START_URLS
-    )
-
-    discovered_pages = set(
-        START_URLS
-    )
-
-    discovered_pdfs = set()
-
-    checked_pages = 0
-
-    print()
-    print(
-        "=============================================="
-    )
-    print(
-        "🚨 TBS GRÓJECKA 91 MONITOR v3"
-    )
-    print(
-        "=============================================="
+    first_run = (
+        not state["pages"]
+        and not state["pdfs"]
     )
 
     print(
-        f"Pierwsze uruchomienie: "
-        f"{first_run}"
+        f"Pierwsze uruchomienie: {first_run}"
     )
 
-    # ========================================================
-    # CRAWLER
-    # ========================================================
+    alerts = []
 
-    while (
-        pages_to_check
-        and checked_pages < MAX_PAGES
-    ):
+    # --------------------------------------------------------
+    # MONITOROWANIE STRON
+    # --------------------------------------------------------
 
-        page_url = pages_to_check.pop(
-            0
+    for url in MONITOR_URLS:
+
+        check_page(
+            url,
+            state,
+            first_run,
+            alerts
         )
 
-        checked_pages += 1
-
-        print()
-        print(
-            f"[{checked_pages}/{MAX_PAGES}] "
-            f"🌐 {page_url}"
-        )
+        # Jeśli strona jest TBS i działa,
+        # sprawdzamy znajdujące się na niej PDF-y.
+        response = None
 
         try:
 
-            html = get_page(
-                page_url
+            response = SESSION.get(
+                url,
+                timeout=30
+            )
+
+            if (
+                response.status_code == 200
+                and "text/html"
+                in response.headers.get(
+                    "content-type",
+                    ""
+                ).lower()
+            ):
+
+                check_pdfs(
+                    url,
+                    response.text,
+                    state,
+                    first_run,
+                    alerts
+                )
+
+        except Exception:
+            pass
+
+    # --------------------------------------------------------
+    # TELEGRAM
+    # --------------------------------------------------------
+
+    if alerts:
+
+        print()
+        print(
+            f"🚨 LICZBA ALARMÓW: {len(alerts)}"
+        )
+
+        message = (
+            "🚨 TBS GRÓJECKA 91\n"
+            "NOWA INFORMACJA!\n\n"
+        )
+
+        for alert in alerts:
+
+            if alert["type"] == "status":
+                icon = "🚨"
+
+            elif alert["type"] == "pdf":
+                icon = "📄"
+
+            else:
+                icon = "🌐"
+
+            message += (
+                f"{icon} "
+                f"{alert['title']}\n"
+            )
+
+            message += (
+                f"{alert['url']}\n"
+            )
+
+            if alert.get("keywords"):
+
+                message += (
+                    "🔎 "
+                    + ", ".join(
+                        alert["keywords"]
+                    )
+                    + "\n"
+                )
+
+            message += "\n"
+
+        try:
+
+            telegram(message)
+
+            print(
+                "📨 ALARM WYSŁANY DO TELEGRAMA"
             )
 
         except Exception as error:
 
             print(
-                f"     ❌ Błąd strony: {error}"
-            )
-
-            continue
-
-        # ----------------------------------------------------
-        # TEKST STRONY
-        # ----------------------------------------------------
-
-        page_text = extract_page_text(
-            html
-        )
-
-        page_hash = sha256_text(
-            page_text
-        )
-
-        old_page_hash = state[
-            "pages"
-        ].get(page_url)
-
-        if old_page_hash is None:
-
-            print(
-                "     🆕 Nowa strona — "
-                "zapisuję stan."
-            )
-
-            state[
-                "pages"
-            ][page_url] = page_hash
-
-        elif old_page_hash != page_hash:
-
-            print(
-                "     🔄 ZMIANA TREŚCI!"
-            )
-
-            state[
-                "pages"
-            ][page_url] = page_hash
-
-            analysis = analyse(
-                page_text,
-                page_url
-            )
-
-            print(
-                f"     Analiza: "
-                f"{analysis['confidence']} "
-                f"/ {analysis['reason']}"
-            )
-
-            if analysis[
-                "is_result"
-            ]:
-
-                detections.append({
-                    "type": "PAGE",
-                    "url": page_url,
-                    "title": (
-                        "Nowa treść strony"
-                    ),
-                    "analysis": analysis,
-                })
-
-        else:
-
-            print(
-                "     ✓ Tekst bez zmian."
-            )
-
-        # ----------------------------------------------------
-        # PDF
-        # ----------------------------------------------------
-
-        pdfs = find_pdfs(
-            html,
-            page_url
-        )
-
-        print(
-            f"     📄 PDF-y znalezione: "
-            f"{len(pdfs)}"
-        )
-
-        for pdf in pdfs:
-
-            if len(
-                discovered_pdfs
-            ) >= MAX_PDFS:
-
-                break
-
-            pdf_url = pdf[
-                "url"
-            ]
-
-            if pdf_url in discovered_pdfs:
-
-                continue
-
-            discovered_pdfs.add(
-                pdf_url
-            )
-
-            print(
-                f"     → PDF: "
-                f"{pdf_url}"
-            )
-
-            try:
-
-                data = download_pdf(
-                    pdf_url
-                )
-
-            except Exception as error:
-
-                print(
-                    f"       ❌ Nie można pobrać: "
-                    f"{error}"
-                )
-
-                continue
-
-            current_hash = sha256_bytes(
-                data
-            )
-
-            old_hash = state[
-                "pdfs"
-            ].get(pdf_url)
-
-            # ------------------------------------------------
-            # NOWY PDF
-            # ------------------------------------------------
-
-            if old_hash is None:
-
-                print(
-                    "       🆕 NOWY PDF"
-                )
-
-                state[
-                    "pdfs"
-                ][pdf_url] = current_hash
-
-                # Pierwsze uruchomienie:
-                # tylko zapisujemy stan.
-                if first_run:
-
-                    continue
-
-                pdf_text = extract_pdf_text(
-                    data
-                )
-
-                analysis = analyse(
-                    pdf_text,
-                    pdf_url,
-                    pdf["title"]
-                )
-
-                print(
-                    f"       Analiza: "
-                    f"{analysis['confidence']} "
-                    f"/ {analysis['reason']}"
-                )
-
-                if analysis[
-                    "is_result"
-                ]:
-
-                    detections.append({
-                        "type": "PDF",
-                        "url": pdf_url,
-                        "title": pdf["title"],
-                        "analysis": analysis,
-                    })
-
-            # ------------------------------------------------
-            # ZMIANA PDF
-            # ------------------------------------------------
-
-            elif old_hash != current_hash:
-
-                print(
-                    "       🔄 PDF ZMIENIONY"
-                )
-
-                state[
-                    "pdfs"
-                ][pdf_url] = current_hash
-
-                pdf_text = extract_pdf_text(
-                    data
-                )
-
-                analysis = analyse(
-                    pdf_text,
-                    pdf_url,
-                    pdf["title"]
-                )
-
-                print(
-                    f"       Analiza: "
-                    f"{analysis['confidence']} "
-                    f"/ {analysis['reason']}"
-                )
-
-                if analysis[
-                    "is_result"
-                ]:
-
-                    detections.append({
-                        "type": "PDF",
-                        "url": pdf_url,
-                        "title": (
-                            pdf["title"]
-                            + " — ZMIENIONO"
-                        ),
-                        "analysis": analysis,
-                    })
-
-            else:
-
-                print(
-                    "       ✓ PDF bez zmian."
-                )
-
-        # ----------------------------------------------------
-        # ODKRYWANIE KOLEJNYCH STRON
-        # ----------------------------------------------------
-
-        links = find_links(
-            html,
-            page_url
-        )
-
-        for link in links:
-
-            link_url = link[
-                "url"
-            ]
-
-            if link_url in discovered_pages:
-                continue
-
-            if ".pdf" in link_url.lower():
-                continue
-
-            link_text = normalize(
-                link["title"]
-            )
-
-            url_text = normalize(
-                link_url
-            )
-
-            searchable = (
-                link_text
-                + " "
-                + url_text
-            )
-
-            # Strona jest interesująca,
-            # jeśli wygląda na związaną
-            # z naborem / Grójecką.
-            interesting = any(
-                word in searchable
-                for word in [
-                    "grojecka",
-                    "grójecka",
-                    "nabor",
-                    "nabór",
-                    "wyniki",
-                    "lista",
-                    "wniosek",
-                    "wnioski",
-                    "mieszkania",
-                    "najem",
-                    "wnioskodawca",
-                    "wnioskodawcy",
-                    "komunikat",
-                    "ogloszenie",
-                    "ogłoszenie",
-                ]
-            )
-
-            if interesting:
-
-                discovered_pages.add(
-                    link_url
-                )
-
-                pages_to_check.append(
-                    link_url
-                )
-
-    # ========================================================
-    # DIAGNOSTYKA
-    # ========================================================
-
-    print()
-    print(
-        "=============================================="
-    )
-    print(
-        "📊 PODSUMOWANIE"
-    )
-    print(
-        "=============================================="
-    )
-
-    print(
-        f"🌐 Sprawdzone strony: "
-        f"{checked_pages}"
-    )
-
-    print(
-        f"📄 Unikalne PDF-y: "
-        f"{len(discovered_pdfs)}"
-    )
-
-    print(
-        f"🚨 Wykryte wyniki: "
-        f"{len(detections)}"
-    )
-
-    # ========================================================
-    # TELEGRAM
-    # ========================================================
-
-    if detections:
-
-        message = (
-            "🚨🚨🚨 TBS GRÓJECKA 91 🚨🚨🚨\n\n"
-            "WYKRYTO MOŻLIWE WYNIKI NABORU!\n\n"
-        )
-
-        for detection in detections:
-
-            message += format_detection(
-                detection
-            )
-
-            message += "\n"
-
-        message += (
-            "👉 Sprawdź dokument/stronę "
-            "bezpośrednio.\n"
-        )
-
-        # Hash alarmu
-        alert_hash = sha256_text(
-            message
-        )
-
-        if (
-            alert_hash
-            not in state["alerts"]
-        ):
-
-            try:
-
-                telegram(
-                    message
-                )
-
-                state[
-                    "alerts"
-                ][alert_hash] = True
-
-                print(
-                    "📱 🚨 TELEGRAM: WYSŁANO!"
-                )
-
-            except Exception as error:
-
-                print(
-                    f"📱 ❌ TELEGRAM ERROR: "
-                    f"{error}"
-                )
-
-        else:
-
-            print(
-                "📱 ✓ Ten sam alarm "
-                "został już wysłany."
+                f"❌ BŁĄD TELEGRAM: {error}"
             )
 
     else:
 
+        print()
         print(
-            "📱 Telegram: "
-            "brak alarmu."
+            "✅ Brak nowych wyników."
+        )
+        print(
+            "Telegram: brak alarmu."
         )
 
-    # ========================================================
-    # ZAPIS
-    # ========================================================
+    save_state(state)
 
-    state[
-        "initialized"
-    ] = True
-
-    save_state(
-        state
-    )
-
+    print()
     print(
-        "💾 State zapisany."
+        "💾 Stan zapisany."
     )
-
-    print(
-        "=============================================="
-    )
+    print("=" * 55)
 
 
 if __name__ == "__main__":
