@@ -2,27 +2,27 @@
   "pages": {
     "https://www.tbswp.pl/": {
       "status": 200,
-      "hash": "5dba97ab4cece7c7cd811b86609adac1629f8805b87881b33a3c9ad28d9c7ffe"
+      "hash": "70c074ca41fb6c8eaab215fac101537b4b3aeb2b09b3f3d1deb918f6b3db63d2"
     },
     "https://www.tbswp.pl/node/311": {
-      "status": 200,
+      "status": 404,
       "hash": "5dba97ab4cece7c7cd811b86609adac1629f8805b87881b33a3c9ad28d9c7ffe"
     },
     "https://www.tbswp.pl/aktualnosci": {
       "status": 200,
-      "hash": "5dba97ab4cece7c7cd811b86609adac1629f8805b87881b33a3c9ad28d9c7ffe"
+      "hash": "6bb418053b6dafe27901ee2d84cab88022fa925c02845b962d6c1ad474941b5e"
     },
     "https://www.tbswp.pl/projekty/projekty_inwestycyjne": {
       "status": 200,
-      "hash": "5dba97ab4cece7c7cd811b86609adac1629f8805b87881b33a3c9ad28d9c7ffe"
+      "hash": "1e97ad28e410f87a9ed015750a645781f047d8853fd42036a0bebc0c0d76adbb"
     },
     "https://www.tbswp.pl/wynajem": {
       "status": 200,
-      "hash": "5dba97ab4cece7c7cd811b86609adac1629f8805b87881b33a3c9ad28d9c7ffe"
+      "hash": "53941fc66c52b54dbb3c35880650abeadd92806a5b82fca668436e4ef7734245"
     },
     "https://www.tbswp.pl/wynajem/lokale_mieszkalne": {
       "status": 200,
-      "hash": "5dba97ab4cece7c7cd811b86609adac1629f8805b87881b33a3c9ad28d9c7ffe"
+      "hash": "bf3b163afc46ae6a912834a5f70d7381dbd078ba1ddd084945dd013da82cd785"
     },
     "https://mieszkania.um.warszawa.pl/-/inwestycja-przy-ul-grojeckiej-91-nabor-wnioskow-1": {
       "status": 403,
