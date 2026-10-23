@@ -2,7 +2,7 @@
   "pages": {
     "https://www.tbswp.pl/": {
       "status": 200,
-      "hash": "05ceb396874ee97379d4eea7c5e25634dbb0c11f3a5391b68bf8398f2a5f767e"
+      "hash": "30a52b3fe774eafe779fe6cc8c1a545a528453bd24b7437a3163ccc71e9204d7"
     },
     "https://www.tbswp.pl/node/311": {
       "status": 200,
@@ -10,7 +10,7 @@
     },
     "https://www.tbswp.pl/aktualnosci": {
       "status": 200,
-      "hash": "0ccbceb1f1413ab8b52aba2b7ef38d52ca92dbd3bfae6d990f7ec60922038764"
+      "hash": "708b401b0689d734af8bdac237dbfa470b8a1787bf848b0368af7977081332f3"
     },
     "https://www.tbswp.pl/projekty/projekty_inwestycyjne": {
       "status": 200,
