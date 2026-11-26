@@ -25,11 +25,11 @@
       "hash": "bf3b163afc46ae6a912834a5f70d7381dbd078ba1ddd084945dd013da82cd785"
     },
     "https://mieszkania.um.warszawa.pl/-/inwestycja-przy-ul-grojeckiej-91-nabor-wnioskow-1": {
-      "status": 503,
+      "status": 403,
       "hash": null
     },
     "https://um.warszawa.pl/-/tbs-wydluza-termin-skladania-wnioskow-o-najem-lokali-przy-ul-grojeckiej-91": {
-      "status": 503,
+      "status": 403,
       "hash": null
     }
   },
